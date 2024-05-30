@@ -1,0 +1,323 @@
+import numpy as np
+from math import comb
+from ctypes import * 
+import ctypes.util
+import plotly.graph_objs as go
+from collections import defaultdict
+from plotly.offline import iplot
+import itertools
+from qpsolvers import solve_qp
+from tqdm import tqdm
+import qpsolvers
+import gudhi
+import matplotlib.pyplot as plot
+from numpy import genfromtxt
+from concurrent.futures import ProcessPoolExecutor
+from itertools import repeat
+
+class SimplexTree: 
+    
+    def __init__(self): 
+        
+        self.X = defaultdict(lambda: defaultdict(list))
+
+    def contains_simplex(self, my_tuple): 
+        
+        curr_level = self.X
+        for index in my_tuple: 
+            if index in curr_level.keys():
+                curr_level = curr_level[index] 
+            else: 
+                return False 
+            
+        return True
+    
+    def simplex_leaves(self, my_tuple): 
+        
+        curr_level = self.X
+        for index in my_tuple: 
+            if index in curr_level.keys():
+                curr_level = curr_level[index] 
+            else: 
+                return [] 
+            
+        return list(curr_level.keys())
+    
+    def add_simplex(self,new_simplex):
+    
+        curr_level = self.X
+        for index in new_simplex[:-1]: 
+            if index in curr_level.keys():
+                curr_level = curr_level[index] 
+            else: 
+                return False 
+        
+        curr_level[new_simplex[-1]] = defaultdict(lambda: defaultdict(list))
+        
+        return True
+
+def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
+
+    ambient_dim = len(S[0])
+    H = np.identity(ambient_dim,dtype=c_double)
+        
+    # compute the 1 skeleton of the weighted cech complex <-> just checking if the ball cover intersects pairwise
+    R = [np.sqrt(a1 + P[i]) for i in range(len(S))]
+    
+    print("Generating 1-Dimensional Weighted Cech Complex")
+    
+    with tqdm(total = len(S) ** 2) as pbar:
+        
+        Y = []
+        Y_skel = []
+        for i in range(len(S)): 
+            curr_row = []
+            for j in range(len(S)): 
+                center_distance = np.linalg.norm(S[i] - S[j])
+                if i < j and R[i] + R[j] >= center_distance:
+                    Y_skel.append([i,j])
+                    Y_skel.append([j,i])
+                    curr_row.append(1)
+                else: 
+                    curr_row.append(0) 
+                    
+                pbar.update(1)
+                
+            Y.append(curr_row)
+    
+    print("\tTotal Edges of Cech Graph: ", len(Y_skel))
+    
+    def max_degree_of_cech_graph():
+        
+        record_instances = defaultdict(int)
+        
+        for edge in Y_skel: 
+            record_instances[edge[0]] += 1
+            
+        max_val = 0
+        for k, v in record_instances.items():
+            if v > max_val: 
+                max_val = v 
+                
+        return max_val / 2
+        
+    print("\tHighest Degree of Cech Graph: ", max_degree_of_cech_graph())
+        
+    print("Begin Computing Alpha Complex")
+     
+    alpha_complex = defaultdict(list)
+    N = len(S) + 1
+    d_1 = D + 1
+        
+    X = SimplexTree()
+
+    # Preprocess Neighbors
+    print("Preprocessing Dual Matrices: ", len(S))
+
+    BigN_G = []
+    BigA = []
+    BigV = []
+    BigF = []
+
+    with tqdm(total = len(S) ) as pbar:
+        
+        for landmark in range(len(S)):
+            
+            BigN_G.append([j for j in range(len(S)) if Y[landmark][j] == 1])
+    
+            A_i = lambda i : S[i] - S[landmark]
+            V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
+        
+            BigA.append(np.array([A_i(i) for i in range(len(S))], dtype=c_double))
+            BigV.append(np.array([V_i(i) for i in range(len(S))], dtype=c_double))
+            BigF.append(-1 * np.array(S[landmark], dtype=c_double))
+
+            pbar.update(1)
+                
+    for d in range(D + 1): 
+
+        print("*********** BEGIN DIMENSION " + str(d) + " ***********")
+        
+        Sigma = []
+        
+        if d == 0: 
+            Sigma = list(range(len(S)))
+        
+        if d == 1: 
+            Sigma = []
+            for sigma in Y_skel: 
+                if sigma[0] < sigma[1]:
+                    Sigma.append(sigma)
+                            
+#         if d == 2: 
+            
+#             Sigma = []
+            
+#             print("Estimating Number of Facets for dimension ", d)
+            
+#             with tqdm(total=comb(len(S),  d + 1)) as pbar:
+            
+#                 # check if all components are in the previous skeleton 
+#                 for simplex in itertools.combinations(range(len(S)), r = d + 1):
+
+#                     flag = 1
+#                     for sub_simplex in itertools.combinations(simplex, r = d):
+
+#                         if not X.contains_simplex(list(sub_simplex)):
+#                             flag = 0
+#                             break
+
+#                     if flag == 1:
+#                         Sigma.append(list(simplex))
+                        
+#                     pbar.update(1)
+                                
+        if d > 1: 
+            
+            print("Estimating Number of Facets for dimension ", d)
+            
+            facets_to_consider = alpha_complex[d-1]
+            visited_prev_words = SimplexTree()
+            visited_prev_word_list = []
+            
+            for facet, val in facets_to_consider:
+                sub_facet = facet[:-1]
+                if not visited_prev_words.contains_simplex(sub_facet):
+                    visited_prev_words.add_simplex(sub_facet)
+                    visited_prev_word_list.append(sub_facet)
+                    
+            Sigma = [] 
+                    
+            for word in visited_prev_word_list:
+                
+                indices = X.simplex_leaves(word)
+                
+                for choose_pair in itertools.combinations(indices, r = 2):
+                    Sigma.append(word + list(choose_pair))                       
+                    
+        print("\tPossible Facets: ", len(Sigma))
+        
+        with tqdm(total=len(Sigma)) as pbar:
+
+            for simplex in Sigma: 
+
+                if isinstance(simplex, int):
+                    landmark = simplex
+                else: 
+                    landmark = simplex[0]
+
+                N_G = BigN_G[landmark] #[j for j in range(len(S)) if Y[landmark][j] == 1]
+
+                A = BigA[landmark] #np.array([A_i(i) for i in range(len(S))], dtype=c_double)
+                V = BigV[landmark] #np.array([V_i(i) for i in range(len(S))], dtype=c_double)
+                f = BigF[landmark] #-1 * np.array(S[landmark], dtype=c_double)
+
+                if not isinstance(simplex, int):
+                    J = list(simplex)
+                    J.remove(landmark)
+                else: 
+                    J = []
+
+                not_J = []
+                for l in N_G:
+                    if l != landmark and l not in J:
+                        not_J.append(l)
+                            
+                # Try to move this outside the for loop for better space management 
+                G = A[not_J,:]
+                h = V[not_J]
+
+                A_eq = A[J,:]
+                b_eq = V[J]
+
+                y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
+
+                if y is not None: 
+
+                    fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
+
+                    objmax = (P[landmark] + a1)/2
+
+                    if fval >= objmax - primtol:
+                        continue
+
+                    else: 
+                        curr_weight = 2*fval - P[landmark] 
+
+                        if isinstance(simplex, int):
+                            simplex = [simplex]
+
+                        if not X.contains_simplex(simplex):
+
+                            X.add_simplex(simplex)
+
+                            trimmed_simplex = simplex
+                            while not isinstance(trimmed_simplex, int) and len(trimmed_simplex) > 0 and trimmed_simplex[-1] == 0:
+                                trimmed_simplex = trimmed_simplex[:-1]
+
+                            if isinstance(trimmed_simplex, int):
+                                alpha_complex[d].append(([trimmed_simplex], curr_weight))
+                            else:
+                                alpha_complex[d].append((trimmed_simplex, curr_weight))
+
+                pbar.update(1)
+
+        print("\tFinal Number of Facets: ", len(alpha_complex[d]))
+        
+    return alpha_complex
+
+def draw_alpha_complex(alpha_complex, S, a1):
+    
+    fig = go.Figure()
+    
+    things_to_plot = []
+    
+    # Set axes properties
+    fig.update_xaxes(range=[-5, 5], zeroline=False)
+    fig.update_yaxes(range=[-2, 8])
+
+    filtered_nodes = []
+    
+    for xyz, simplex in zip(S, alpha_complex[0]):
+        
+        if simplex[1] < a1: 
+            filtered_nodes.append(xyz)
+            
+    filtered_nodes = np.array(filtered_nodes)
+        
+    things_to_plot.append(go.Scatter3d(x=filtered_nodes[:,0], y=filtered_nodes[:,1], z=filtered_nodes[:,2],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=filtered_nodes[:,2],                # set color to an array/list of desired values
+                colorscale='Viridis',   # choose a colorscale
+                opacity=0.8
+            ), showlegend=False))
+    
+    # for simplex, weight in alpha_complex[1]:
+    #     if weight < a1:
+    #         things_to_plot.append(go.Scatter3d(x=[S[simplex[0]][0], S[simplex[1]][0]], y=[S[simplex[0]][1], S[simplex[1]][1]], z=[S[simplex[0]][2], S[simplex[1]][2]], mode='lines',line=dict(
+    #                                             color="black",
+    #                                             width=10),showlegend=False))
+        
+    # for simplex, weight in alpha_complex[2]:
+    #     if weight < a1:
+    #         X = [S[simplex[0]][0], S[simplex[1]][0], S[simplex[2]][0]]
+    #         Y = [S[simplex[0]][1], S[simplex[1]][1], S[simplex[2]][1]]
+    #         Z = [S[simplex[0]][2], S[simplex[1]][2], S[simplex[2]][2]]
+            
+    #         i = np.array([0])
+    #         j = np.array([1])
+    #         k = np.array([2])
+            
+    #         things_to_plot.append(go.Mesh3d(x=X, y=Y, z=Z,alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k))
+        
+    layout = go.Layout(
+        autosize=False,
+        width=1000,
+        height=1000
+    )
+        
+    fig = go.Figure(data=things_to_plot, layout=layout)
+        
+    fig.show()
