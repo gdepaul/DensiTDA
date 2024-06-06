@@ -56,6 +56,96 @@ class SimplexTree:
         
         return True
 
+def loop_task_1(i, S, P, R):
+    
+    Y_skel_partial = []
+    for j in range(len(S)): 
+        center_distance = np.linalg.norm(S[i] - S[j])
+        if i < j and R[i] + R[j] >= center_distance:
+            Y_skel_partial.append([i,j])
+            Y_skel_partial.append([j,i])
+                                    
+    return Y_skel_partial
+
+def loop_task_2(batch_landmarks, S, P, Y):
+
+    currNG = []
+    currA = []
+    currV = []
+    currF = []
+
+    for landmark in batch_landmarks:
+
+        currNG.append([j for j in range(len(S)) if Y[landmark][j] == 1])
+        
+        A_i = lambda i : S[i] - S[landmark]
+        V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
+            
+        currA.append(np.array([A_i(j) for j in range(len(S))], dtype=c_double))
+        currV.append(np.array([V_i(j) for j in range(len(S))], dtype=c_double))
+        currF.append(-1 * np.array(S[landmark], dtype=c_double))
+    
+    return batch_landmarks, currNG, currA, currV, currF
+
+def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, primtol):
+
+    ambient_dim = len(S[0])
+    H = np.identity(ambient_dim,dtype=c_double)
+
+    tempX = []
+    tempAlpha = []
+
+    for simplex_index in simplex_indices: 
+        simplex = Sigma[simplex_index]
+
+        if isinstance(simplex, int):
+            landmark = simplex
+        else: 
+            landmark = simplex[0]
+
+        N_G = BigN_G[landmark]
+
+        A = BigA[landmark]
+        V = BigV[landmark]
+        f = BigF[landmark]
+
+        if not isinstance(simplex, int):
+            J = list(simplex)
+            J.remove(landmark)
+        else: 
+            J = []
+
+        not_J = []
+        for l in N_G:
+            if l != landmark and l not in J:
+                not_J.append(l)
+                            
+        G = A[not_J,:]
+        h = V[not_J]
+
+        A_eq = A[J,:]
+        b_eq = V[J]
+
+        y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
+
+        if y is not None: 
+
+            fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
+
+            objmax = (P[landmark] + a1)/2
+
+            if fval < objmax - primtol:
+
+                curr_weight = 2*fval - P[landmark] 
+
+                if isinstance(simplex, int):
+                    simplex = [simplex]
+
+                tempX.append(simplex)
+                tempAlpha.append((simplex, curr_weight))
+
+    return tempX, tempAlpha
+
 def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
 
     ambient_dim = len(S[0])
@@ -65,24 +155,36 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     R = [np.sqrt(a1 + P[i]) for i in range(len(S))]
     
     print("Generating 1-Dimensional Weighted Cech Complex")
-    
-    with tqdm(total = len(S) ** 2) as pbar:
         
-        Y = []
-        Y_skel = []
-        for i in range(len(S)): 
-            curr_row = []
-            for j in range(len(S)): 
-                center_distance = np.linalg.norm(S[i] - S[j])
-                if R[i] + R[j] >= center_distance:
-                    Y_skel.append([i,j])
-                    curr_row.append(1)
-                else: 
-                    curr_row.append(0) 
+    with ProcessPoolExecutor(max_workers=8) as pool:
+                        
+        result = list(tqdm(pool.map(loop_task_1,  range(len(S)), repeat(S), repeat(P), repeat(R) ), total = len(S)))
+        
+    Y = np.zeros((len(S), len(S)))
+    Y_skel = []
+    for Y_skel_partial in result: 
+        Y_skel += Y_skel_partial
+
+        for curr_tuple in Y_skel_partial: 
+            Y[tuple(curr_tuple)] = 1
+    
+    # with tqdm(total = len(S) ** 2) as pbar:
+        
+    #     Y = []
+    #     Y_skel = []
+    #     for i in range(len(S)): 
+    #         curr_row = []
+    #         for j in range(len(S)): 
+    #             center_distance = np.linalg.norm(S[i] - S[j])
+    #             if R[i] + R[j] >= center_distance:
+    #                 Y_skel.append([i,j])
+    #                 curr_row.append(1)
+    #             else: 
+    #                 curr_row.append(0) 
                     
-                pbar.update(1)
+    #             pbar.update(1)
                 
-            Y.append(curr_row)
+    #         Y.append(curr_row)
     
     print("\tTotal Edges of Cech Graph: ", int(len(Y_skel) / 2) )
     
@@ -113,25 +215,51 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     # Preprocess Neighbors
     print("Preprocessing Dual Matrices: ", len(S))
 
-    BigN_G = []
-    BigA = []
-    BigV = []
-    BigF = []
+    batch_size = 1000
 
-    with tqdm( total = len(S) ) as pbar:
-        
-        for landmark in range(len(S)):
-            
-            BigN_G.append([j for j in range(len(S)) if Y[landmark][j] == 1])
+    if len(S) <= batch_size: 
+        BigN_G = []
+        BigA = []
+        BigV = []
+        BigF = []
     
-            A_i = lambda i : S[i] - S[landmark]
-            V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
+        with tqdm( total = len(S) ) as pbar:
+            
+            for landmark in range(len(S)):
+                
+                BigN_G.append([j for j in range(len(S)) if Y[landmark][j] == 1])
         
-            BigA.append(np.array([A_i(j) for j in range(len(S))], dtype=c_double))
-            BigV.append(np.array([V_i(j) for j in range(len(S))], dtype=c_double))
-            BigF.append(-1 * np.array(S[landmark], dtype=c_double))
-
-            pbar.update(1)
+                A_i = lambda i : S[i] - S[landmark]
+                V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
+            
+                BigA.append(np.array([A_i(j) for j in range(len(S))], dtype=c_double))
+                BigV.append(np.array([V_i(j) for j in range(len(S))], dtype=c_double))
+                BigF.append(-1 * np.array(S[landmark], dtype=c_double))
+    
+                pbar.update(1)
+    else:
+        BigN_G = len(S) * [0]
+        BigA = len(S) * [0]
+        BigV = len(S) * [0]
+        BigF = len(S) * [0]
+    
+        batches = []
+        curr_index = 0
+        while curr_index + batch_size < len(S): 
+            batches.append(range(curr_index, curr_index + batch_size))
+            curr_index += batch_size
+        batches.append(range(curr_index, len(S)))
+        
+        with ProcessPoolExecutor(max_workers=8) as pool:
+                            
+            result = list(tqdm(pool.map(loop_task_2,  batches, repeat(S), repeat(P), repeat(Y) ), total = len(batches)))
+    
+        for batch_landmarks, currNG, currA, currV, currF in result:
+            for k, landmark in enumerate(batch_landmarks): 
+                BigN_G[landmark] = currNG[k]
+                BigA[landmark] = currA[k]
+                BigV[landmark] = currV[k]
+                BigF[landmark] = currF[k]
                 
     for d in range(D + 1): 
 
@@ -163,74 +291,100 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                     visited_prev_word_list.append(sub_facet)
                     
             Sigma = [] 
-                    
             for word in visited_prev_word_list:
-                
                 indices = X.simplex_leaves(word)
-                
                 for choose_pair in itertools.combinations(indices, r = 2):
-                    Sigma.append(word + list(choose_pair))                       
+                    suggested_word = word + list(choose_pair)
+                    flag = True
+                    for subsimplex in list(itertools.combinations(suggested_word, len(suggested_word) - 1)):
+                        if not X.contains_simplex(subsimplex): 
+                            flag = False
+                            break
+
+                    if flag:
+                        Sigma.append(word + list(choose_pair))
+
+            print(len(Sigma))
                     
         print("\tPossible Facets: ", len(Sigma))
+
+        if len(Sigma) > 0:
+
+            batch_size = 400000
+            if len(Sigma) < batch_size:
+            
+                with tqdm(total=len(Sigma)) as pbar:
         
-        with tqdm(total=len(Sigma)) as pbar:
-
-            for simplex in Sigma: 
-
-                if isinstance(simplex, int):
-                    landmark = simplex
-                else: 
-                    landmark = simplex[0]
-
-                N_G = BigN_G[landmark]
-
-                A = BigA[landmark]
-                V = BigV[landmark]
-                f = BigF[landmark]
-
-                if not isinstance(simplex, int):
-                    J = list(simplex)
-                    J.remove(landmark)
-                else: 
-                    J = []
-
-                not_J = []
-                for l in N_G:
-                    if l != landmark and l not in J:
-                        not_J.append(l)
-                            
-                G = A[not_J,:]
-                h = V[not_J]
-
-                A_eq = A[J,:]
-                b_eq = V[J]
-
-                y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
-
-                if y is not None: 
-
-                    fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
-
-                    objmax = (P[landmark] + a1)/2
-
-                    if fval < objmax - primtol:
-
-                        curr_weight = 2*fval - P[landmark] 
-
+                    for simplex in Sigma: 
+        
                         if isinstance(simplex, int):
-                            simplex = [simplex]
-
-                        if not X.contains_simplex(simplex):
-
+                            landmark = simplex
+                        else: 
+                            landmark = simplex[0]
+        
+                        N_G = BigN_G[landmark]
+        
+                        A = BigA[landmark]
+                        V = BigV[landmark]
+                        f = BigF[landmark]
+        
+                        if not isinstance(simplex, int):
+                            J = list(simplex)
+                            J.remove(landmark)
+                        else: 
+                            J = []
+        
+                        not_J = []
+                        for l in N_G:
+                            if l != landmark and l not in J:
+                                not_J.append(l)
+                                    
+                        G = A[not_J,:]
+                        h = V[not_J]
+        
+                        A_eq = A[J,:]
+                        b_eq = V[J]
+        
+                        y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
+        
+                        if y is not None: 
+        
+                            fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
+        
+                            objmax = (P[landmark] + a1)/2
+        
+                            if fval < objmax - primtol:
+        
+                                curr_weight = 2*fval - P[landmark] 
+        
+                                if isinstance(simplex, int):
+                                    simplex = [simplex]
+        
+                                if not X.contains_simplex(simplex):
+    
+                                    X.add_simplex(simplex)
+                                    alpha_complex[d].append((simplex, curr_weight))
+        
+                        pbar.update(1)
+            else:
+                batches = []
+                curr_index = 0
+                while curr_index + batch_size < len(Sigma): 
+                    batches.append(range(curr_index, curr_index + batch_size))
+                    curr_index += batch_size
+                batches.append(range(curr_index, len(Sigma)))
+                
+                with ProcessPoolExecutor(max_workers=8) as pool:
+                                    
+                    result = list(tqdm(pool.map(loop_task_3,  batches, repeat(Sigma), repeat(BigN_G), repeat(BigA), repeat(BigV), repeat(BigF), repeat(S), repeat(P), repeat(a1), repeat(primtol)), total = len(batches)))
+                
+                for tempX, tempAlpha in result:
+                    for simplex, curr_tuple in zip(tempX, tempAlpha):
+                        if not X.contains_simplex(simplex): 
+    
                             X.add_simplex(simplex)
-
-                            if isinstance(simplex, int):
-                                alpha_complex[d].append(([simplex], curr_weight))
-                            else:
-                                alpha_complex[d].append((simplex, curr_weight))
-
-                pbar.update(1)
-
+                            alpha_complex[d].append(curr_tuple)
+    
         print("\tFinal Number of Facets: ", len(alpha_complex[d]))
         
     return alpha_complex
