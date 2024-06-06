@@ -1,4 +1,4 @@
-name: tensorflow
+name: densitda
 channels:
   - apple
   - conda-forge
@@ -20,6 +20,7 @@ dependencies:
     - flask
     - boto3
     - ipykernel
+    - tqdm
     - seaborn
     - openpyxl
     - keras

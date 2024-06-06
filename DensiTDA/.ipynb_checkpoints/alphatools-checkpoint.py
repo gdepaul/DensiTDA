@@ -56,7 +56,7 @@ class SimplexTree:
         
         return True
 
-def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
+def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
 
     ambient_dim = len(S[0])
     H = np.identity(ambient_dim,dtype=c_double)
@@ -74,9 +74,8 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
             curr_row = []
             for j in range(len(S)): 
                 center_distance = np.linalg.norm(S[i] - S[j])
-                if i < j and R[i] + R[j] >= center_distance:
+                if R[i] + R[j] >= center_distance:
                     Y_skel.append([i,j])
-                    Y_skel.append([j,i])
                     curr_row.append(1)
                 else: 
                     curr_row.append(0) 
@@ -85,7 +84,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
                 
             Y.append(curr_row)
     
-    print("\tTotal Edges of Cech Graph: ", len(Y_skel))
+    print("\tTotal Edges of Cech Graph: ", int(len(Y_skel) / 2) )
     
     def max_degree_of_cech_graph():
         
@@ -99,7 +98,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
             if v > max_val: 
                 max_val = v 
                 
-        return max_val / 2
+        return max_val
         
     print("\tHighest Degree of Cech Graph: ", max_degree_of_cech_graph())
         
@@ -119,7 +118,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
     BigV = []
     BigF = []
 
-    with tqdm(total = len(S) ) as pbar:
+    with tqdm( total = len(S) ) as pbar:
         
         for landmark in range(len(S)):
             
@@ -128,8 +127,8 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
             A_i = lambda i : S[i] - S[landmark]
             V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
         
-            BigA.append(np.array([A_i(i) for i in range(len(S))], dtype=c_double))
-            BigV.append(np.array([V_i(i) for i in range(len(S))], dtype=c_double))
+            BigA.append(np.array([A_i(j) for j in range(len(S))], dtype=c_double))
+            BigV.append(np.array([V_i(j) for j in range(len(S))], dtype=c_double))
             BigF.append(-1 * np.array(S[landmark], dtype=c_double))
 
             pbar.update(1)
@@ -148,30 +147,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
             for sigma in Y_skel: 
                 if sigma[0] < sigma[1]:
                     Sigma.append(sigma)
-                            
-#         if d == 2: 
-            
-#             Sigma = []
-            
-#             print("Estimating Number of Facets for dimension ", d)
-            
-#             with tqdm(total=comb(len(S),  d + 1)) as pbar:
-            
-#                 # check if all components are in the previous skeleton 
-#                 for simplex in itertools.combinations(range(len(S)), r = d + 1):
 
-#                     flag = 1
-#                     for sub_simplex in itertools.combinations(simplex, r = d):
-
-#                         if not X.contains_simplex(list(sub_simplex)):
-#                             flag = 0
-#                             break
-
-#                     if flag == 1:
-#                         Sigma.append(list(simplex))
-                        
-#                     pbar.update(1)
-                                
         if d > 1: 
             
             print("Estimating Number of Facets for dimension ", d)
@@ -206,11 +182,11 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
                 else: 
                     landmark = simplex[0]
 
-                N_G = BigN_G[landmark] #[j for j in range(len(S)) if Y[landmark][j] == 1]
+                N_G = BigN_G[landmark]
 
-                A = BigA[landmark] #np.array([A_i(i) for i in range(len(S))], dtype=c_double)
-                V = BigV[landmark] #np.array([V_i(i) for i in range(len(S))], dtype=c_double)
-                f = BigF[landmark] #-1 * np.array(S[landmark], dtype=c_double)
+                A = BigA[landmark]
+                V = BigV[landmark]
+                f = BigF[landmark]
 
                 if not isinstance(simplex, int):
                     J = list(simplex)
@@ -223,7 +199,6 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
                     if l != landmark and l not in J:
                         not_J.append(l)
                             
-                # Try to move this outside the for loop for better space management 
                 G = A[not_J,:]
                 h = V[not_J]
 
@@ -238,10 +213,8 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
 
                     objmax = (P[landmark] + a1)/2
 
-                    if fval >= objmax - primtol:
-                        continue
+                    if fval < objmax - primtol:
 
-                    else: 
                         curr_weight = 2*fval - P[landmark] 
 
                         if isinstance(simplex, int):
@@ -251,14 +224,10 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
 
                             X.add_simplex(simplex)
 
-                            trimmed_simplex = simplex
-                            while not isinstance(trimmed_simplex, int) and len(trimmed_simplex) > 0 and trimmed_simplex[-1] == 0:
-                                trimmed_simplex = trimmed_simplex[:-1]
-
-                            if isinstance(trimmed_simplex, int):
-                                alpha_complex[d].append(([trimmed_simplex], curr_weight))
+                            if isinstance(simplex, int):
+                                alpha_complex[d].append(([simplex], curr_weight))
                             else:
-                                alpha_complex[d].append((trimmed_simplex, curr_weight))
+                                alpha_complex[d].append((simplex, curr_weight))
 
                 pbar.update(1)
 
@@ -266,7 +235,74 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.00001):
         
     return alpha_complex
 
-def draw_alpha_complex(alpha_complex, S, a1):
+def draw_alpha_complex_2d(alpha_complex, S, p, a1): 
+
+    R = [np.sqrt(a1 + p[i]) for i in range(len(S))]
+
+    Y = []
+    for i in range(len(S)): 
+        curr_row = []
+        for j in range(len(S)): 
+            center_distance = np.linalg.norm(S[i] - S[j])
+            if R[i] + R[j] >= center_distance and i != j:
+                curr_row.append(1)
+            else: 
+                curr_row.append(0) 
+        Y.append(curr_row)
+
+    fig = go.Figure()
+    
+    # Set axes properties
+    fig.update_xaxes(range=[-5, 5], zeroline=False)
+    fig.update_yaxes(range=[-2, 8])
+
+    for i in range(len(S)):
+        center = S[i]
+        center_x = center[0]
+        center_y = center[1]
+        
+        fig.add_shape(type="circle",
+            xref="x", yref="y",
+            fillcolor="PaleTurquoise",
+            x0=center_x - R[i], y0 = center_y - R[i], x1=center_x + R[i], y1=center_y + R[i],
+            line_color="LightSeaGreen",
+            opacity=0.7
+        )
+        
+    fig.add_trace(go.Scatter(x=S[:,0], y=S[:,1], mode="markers"))
+
+    for i in range(len(S)):
+        first_center = S[i]
+        first_center_x = first_center[0]
+        first_center_y = first_center[1]
+        for j in range(len(S)):
+            second_center = S[j]
+            second_center_x = second_center[0]
+            second_center_y = second_center[1]
+            
+            if i != j and Y[i][j] == 1:
+                fig.add_shape(
+                    dict(type="line", x0=first_center_x, x1=second_center_x, y0=first_center_y, y1=second_center_y, line_color="black")
+                )
+
+    if len(alpha_complex[2]) > 0:
+        for simplex, val in alpha_complex[2]:
+                    
+            x0, y0 = S[simplex[0]]
+            x1, y1 = S[simplex[1]]
+            x2, y2 = S[simplex[2]]
+                    
+            fig.add_trace(
+                go.Scatter(x=[x0,x1,x2,x0], y=[y0,y1,y2,y0], fill="toself", opacity=0.5)
+            )
+
+    # Set figure size
+    fig.update_layout(width=800, height=800)
+
+    fig.show()
+
+
+def draw_alpha_complex(alpha_complex, S, a1, points_only = True):
     
     fig = go.Figure()
     
@@ -284,33 +320,36 @@ def draw_alpha_complex(alpha_complex, S, a1):
             filtered_nodes.append(xyz)
             
     filtered_nodes = np.array(filtered_nodes)
+
+    if points_only: 
         
-    things_to_plot.append(go.Scatter3d(x=filtered_nodes[:,0], y=filtered_nodes[:,1], z=filtered_nodes[:,2],
-            mode='markers',
-            marker=dict(
-                size=1,
-                color=filtered_nodes[:,2],                # set color to an array/list of desired values
-                colorscale='Viridis',   # choose a colorscale
-                opacity=0.8
-            ), showlegend=False))
+        things_to_plot.append(go.Scatter3d(x=filtered_nodes[:,0], y=filtered_nodes[:,1], z=filtered_nodes[:,2],
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=filtered_nodes[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=1
+                ), showlegend=False))
+    else: 
     
-    # for simplex, weight in alpha_complex[1]:
-    #     if weight < a1:
-    #         things_to_plot.append(go.Scatter3d(x=[S[simplex[0]][0], S[simplex[1]][0]], y=[S[simplex[0]][1], S[simplex[1]][1]], z=[S[simplex[0]][2], S[simplex[1]][2]], mode='lines',line=dict(
-    #                                             color="black",
-    #                                             width=10),showlegend=False))
-        
-    # for simplex, weight in alpha_complex[2]:
-    #     if weight < a1:
-    #         X = [S[simplex[0]][0], S[simplex[1]][0], S[simplex[2]][0]]
-    #         Y = [S[simplex[0]][1], S[simplex[1]][1], S[simplex[2]][1]]
-    #         Z = [S[simplex[0]][2], S[simplex[1]][2], S[simplex[2]][2]]
+        for simplex, weight in alpha_complex[1]:
+            if weight < a1:
+                things_to_plot.append(go.Scatter3d(x=[S[simplex[0]][0], S[simplex[1]][0]], y=[S[simplex[0]][1], S[simplex[1]][1]], z=[S[simplex[0]][2], S[simplex[1]][2]], mode='lines',line=dict(
+                                                    color="black",
+                                                    width=10),showlegend=False))
             
-    #         i = np.array([0])
-    #         j = np.array([1])
-    #         k = np.array([2])
-            
-    #         things_to_plot.append(go.Mesh3d(x=X, y=Y, z=Z,alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k))
+        for simplex, weight in alpha_complex[2]:
+            if weight < a1:
+                X = [S[simplex[0]][0], S[simplex[1]][0], S[simplex[2]][0]]
+                Y = [S[simplex[0]][1], S[simplex[1]][1], S[simplex[2]][1]]
+                Z = [S[simplex[0]][2], S[simplex[1]][2], S[simplex[2]][2]]
+                
+                i = np.array([0])
+                j = np.array([1])
+                k = np.array([2])
+                
+                things_to_plot.append(go.Mesh3d(x=X, y=Y, z=Z,alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k))
         
     layout = go.Layout(
         autosize=False,
