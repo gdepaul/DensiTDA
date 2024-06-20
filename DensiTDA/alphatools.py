@@ -146,6 +146,25 @@ def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, prim
 
     return tempX, tempAlpha
 
+def compute_weighted_cech_graph(S, P, a1):
+
+    # compute the 1 skeleton of the weighted cech complex <-> just checking if the ball cover intersects pairwise
+    R = [np.sqrt(a1 + P[i]) for i in range(len(S))]
+
+    with ProcessPoolExecutor(max_workers=8) as pool:
+                        
+        result = list(tqdm(pool.map(loop_task_1,  range(len(S)), repeat(S), repeat(P), repeat(R) ), total = len(S)))
+        
+    Y = np.zeros((len(S), len(S)))
+    Y_skel = []
+    for Y_skel_partial in result: 
+        Y_skel += Y_skel_partial
+
+        for curr_tuple in Y_skel_partial: 
+            Y[tuple(curr_tuple)] = 1
+
+    return Y_skel, Y
+
 def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
 
     ambient_dim = len(S[0])
@@ -215,7 +234,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     # Preprocess Neighbors
     print("Preprocessing Dual Matrices: ", len(S))
 
-    batch_size = 1000
+    batch_size = max(1000, int(len(S) / 48))
 
     if len(S) <= batch_size: 
         BigN_G = []
@@ -303,14 +322,18 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
 
                     if flag:
                         Sigma.append(word + list(choose_pair))
-
-            print(len(Sigma))
                     
         print("\tPossible Facets: ", len(Sigma))
 
         if len(Sigma) > 0:
 
-            batch_size = 400000
+            # if len(Sigma) < 500000:
+            #     batch_size = 500000
+            # else: 
+            #     batch_size = int(len(Sigma) / 24)
+
+            batch_size = 10000000
+            
             if len(Sigma) < batch_size:
             
                 with tqdm(total=len(Sigma)) as pbar:
