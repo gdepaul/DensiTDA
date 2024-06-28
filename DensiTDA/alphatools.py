@@ -1,12 +1,13 @@
 import numpy as np
 from math import comb
+import numpy.linalg as LA
 from ctypes import * 
 import ctypes.util
 import plotly.graph_objs as go
 from collections import defaultdict
 from plotly.offline import iplot
 import itertools
-from qpsolvers import solve_qp
+from qpsolvers import Problem, solve_problem #solve_qp, 
 from tqdm import tqdm
 import qpsolvers
 import gudhi
@@ -14,6 +15,7 @@ import matplotlib.pyplot as plot
 from numpy import genfromtxt
 from concurrent.futures import ProcessPoolExecutor
 from itertools import repeat
+from scipy.sparse.csgraph import connected_components
 
 class SimplexTree: 
     
@@ -56,16 +58,28 @@ class SimplexTree:
         
         return True
 
-def loop_task_1(i, S, P, R):
+def loop_task_1(batch_i, S, P, R):
     
     Y_skel_partial = []
-    for j in range(len(S)): 
-        center_distance = np.linalg.norm(S[i] - S[j])
-        if i < j and R[i] + R[j] >= center_distance:
-            Y_skel_partial.append([i,j])
-            Y_skel_partial.append([j,i])
+    for i in batch_i:
+        for j in range(len(S)): 
+            center_distance = np.linalg.norm(S[i] - S[j])
+            if i < j and R[i] + R[j] >= center_distance:
+                Y_skel_partial.append([i,j])
+                Y_skel_partial.append([j,i])
                                     
     return Y_skel_partial
+
+# def loop_task_1(i, S, P, R):
+    
+#     Y_skel_partial = []
+#     for j in range(len(S)): 
+#         center_distance = np.linalg.norm(S[i] - S[j])
+#         if i < j and R[i] + R[j] >= center_distance:
+#             Y_skel_partial.append([i,j])
+#             Y_skel_partial.append([j,i])
+                                    
+#     return Y_skel_partial
 
 def loop_task_2(batch_landmarks, S, P, Y):
 
@@ -86,6 +100,24 @@ def loop_task_2(batch_landmarks, S, P, Y):
         currF.append(-1 * np.array(S[landmark], dtype=c_double))
     
     return batch_landmarks, currNG, currA, currV, currF
+
+# def loop_task_2(batch_landmarks, S, P, Y):
+
+#     indices_of_S = np.arange(len(S))
+
+#     xv, yv = np.meshgrid(indices_of_S, batch_landmarks)
+
+#     currNG = Y == 1
+
+#     A_ij = np.vectorize(lambda i, j : S[i] - S[j])
+#     V_ij = np.vectorize(lambda i, j : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[j]) ** 2 - P[i] + P[j]))
+#     F_j = np.vectorize(lambda landmark : -1 * np.array(S[landmark], dtype=c_double))
+
+#     currA = A_ij(xv, yv).T
+#     currV = V_ij(xv, yv).T
+#     currF = F_j(batch_landmarks)
+    
+#     return batch_landmarks, currNG, currA, currV, currF
 
 def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, primtol):
 
@@ -117,7 +149,7 @@ def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, prim
 
         not_J = []
         for l in N_G:
-            if l != landmark and l not in J:
+            if l not in J:
                 not_J.append(l)
                             
         G = A[not_J,:]
@@ -129,6 +161,9 @@ def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, prim
         y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
 
         if y is not None: 
+            
+            if d > 0 and not solution.is_optimal(primtol):
+                continue
 
             fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
 
@@ -151,9 +186,19 @@ def compute_weighted_cech_graph(S, P, a1):
     # compute the 1 skeleton of the weighted cech complex <-> just checking if the ball cover intersects pairwise
     R = [np.sqrt(a1 + P[i]) for i in range(len(S))]
 
+    batch_size = max(1000, int(len(S) / 24))
+    
+    batches = []
+    curr_index = 0
+    while curr_index + batch_size < len(S): 
+        batches.append(range(curr_index, curr_index + batch_size))
+        curr_index += batch_size
+    batches.append(range(curr_index, len(S)))
+
     with ProcessPoolExecutor(max_workers=8) as pool:
-                        
-        result = list(tqdm(pool.map(loop_task_1,  range(len(S)), repeat(S), repeat(P), repeat(R) ), total = len(S)))
+
+        #result = list(tqdm(pool.map(loop_task_1,  range(len(S)), repeat(S), repeat(P), repeat(R) ), total = len(S)))
+        result = list(tqdm(pool.map(loop_task_1,  batches, repeat(S), repeat(P), repeat(R) ), total = len(batches)))
         
     Y = np.zeros((len(S), len(S)))
     Y_skel = []
@@ -175,9 +220,19 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     
     print("Generating 1-Dimensional Weighted Cech Complex")
         
+    batch_size = max(1000, int(len(S) / 24))
+    
+    batches = []
+    curr_index = 0
+    while curr_index + batch_size < len(S): 
+        batches.append(range(curr_index, curr_index + batch_size))
+        curr_index += batch_size
+    batches.append(range(curr_index, len(S)))
+
     with ProcessPoolExecutor(max_workers=8) as pool:
-                        
-        result = list(tqdm(pool.map(loop_task_1,  range(len(S)), repeat(S), repeat(P), repeat(R) ), total = len(S)))
+
+        #result = list(tqdm(pool.map(loop_task_1,  range(len(S)), repeat(S), repeat(P), repeat(R) ), total = len(S)))
+        result = list(tqdm(pool.map(loop_task_1,  batches, repeat(S), repeat(P), repeat(R) ), total = len(batches)))
         
     Y = np.zeros((len(S), len(S)))
     Y_skel = []
@@ -222,6 +277,8 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
         return max_val
         
     print("\tHighest Degree of Cech Graph: ", max_degree_of_cech_graph())
+
+    print("\tNumber of Connected Components: ", connected_components(Y)[0])
         
     print("Begin Computing Alpha Complex")
      
@@ -234,7 +291,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     # Preprocess Neighbors
     print("Preprocessing Dual Matrices: ", len(S))
 
-    batch_size = max(1000, int(len(S) / 48))
+    batch_size = max(1000, int(len(S) / 24))
 
     if len(S) <= batch_size: 
         BigN_G = []
@@ -350,6 +407,10 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                         A = BigA[landmark]
                         V = BigV[landmark]
                         f = BigF[landmark]
+
+                        #print(simplex, A @ A.T) 
+                        #print(S[landmark].shape)
+                        #print(simplex, A @ S[landmark] - V.T)
         
                         if not isinstance(simplex, int):
                             J = list(simplex)
@@ -368,9 +429,46 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                         A_eq = A[J,:]
                         b_eq = V[J]
         
-                        y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
-        
+                        #y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
+
+                        problem = Problem(H, f, G, h, A_eq, b_eq)
+                        solution = solve_problem(problem, solver="daqp")
+                        y = solution.x
+
+                        # if d > 0 and y is not None and LA.norm(solution.y, ord=1) == 0 and LA.norm(solution.z, ord=1) == 0:
+                        #     print(simplex, solution.y, solution.z, solution.z_box)
+                        #     pbar.update(1)
+                        #     continue
+
+                        # if [4830, 9411] == simplex:
+                        #     print(simplex, solution.x, solution.y, solution.z)
+                        # if [9411, 18382] == simplex:
+                        #     print(simplex, solution.x, solution.y, solution.z)
+                        # if [4830, 18382] == simplex:
+                        #     print(simplex, solution.x, solution.y, solution.z)
+
+                        # if [4830, 9411, 18382] == simplex: 
+                        #     print(simplex, solution.x, solution.y, solution.z)
+
+                        #if d > 0 and y is not None:
+                            
+    
+                        # if d > 0 and y is not None:
+                        #     flag = False
+                        #     for index in simplex: 
+                        #         if np.linalg.norm(y - S[index]) < primtol:
+                        #             flag = True
+
+                        #     if flag: 
+                        #         pbar.update(1)
+                        #         continue
+                            
+                        
                         if y is not None: 
+
+                            if d > 0 and not solution.is_optimal(primtol):
+                                pbar.update(1)
+                                continue
         
                             fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
         
@@ -378,7 +476,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
         
                             if fval < objmax - primtol:
         
-                                curr_weight = 2*fval - P[landmark] 
+                                curr_weight = 2*fval - P[landmark]
         
                                 if isinstance(simplex, int):
                                     simplex = [simplex]
