@@ -404,8 +404,8 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
             # else: 
             #     batch_size = int(len(Sigma) / 24)
 
-            batch_size = 10000
-            #batch_size = 500000
+            #batch_size = 10000
+            batch_size = 500000
 
             
             if len(Sigma) < batch_size:
