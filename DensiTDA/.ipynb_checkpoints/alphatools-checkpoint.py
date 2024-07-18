@@ -84,22 +84,28 @@ def loop_task_1(batch_i, S, P, R):
 def loop_task_2(batch_landmarks, S, P, Y):
 
     currNG = []
+    currReverse = []
     currA = []
     currV = []
     currF = []
 
     for landmark in batch_landmarks:
 
-        currNG.append([j for j in range(len(S)) if Y[landmark][j] == 1])
+
+        curr_N_G = [j for j in range(len(S)) if Y[landmark][j] == 1]
+
+        currNG.append(curr_N_G)
+
+        currReverse.append({curr_N_G[i]: i for i in range(len(curr_N_G))})
         
         A_i = lambda i : S[i] - S[landmark]
         V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
             
-        currA.append(np.array([A_i(j) for j in range(len(S))], dtype=c_double))
-        currV.append(np.array([V_i(j) for j in range(len(S))], dtype=c_double))
+        currA.append(np.array([A_i(j) for j in curr_N_G], dtype=c_double))
+        currV.append(np.array([V_i(j) for j in curr_N_G], dtype=c_double))
         currF.append(-1 * np.array(S[landmark], dtype=c_double))
     
-    return batch_landmarks, currNG, currA, currV, currF
+    return batch_landmarks, currNG, currReverse, currA, currV, currF
 
 # def loop_task_2(batch_landmarks, S, P, Y):
 
@@ -119,7 +125,7 @@ def loop_task_2(batch_landmarks, S, P, Y):
     
 #     return batch_landmarks, currNG, currA, currV, currF
 
-def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, primtol):
+def loop_task_3(simplex_indices, Sigma, d, BigN_G, BigN_G2S, BigA, BigV, BigF, S, P, a1, primtol):
 
     ambient_dim = len(S[0])
     H = np.identity(ambient_dim,dtype=c_double)
@@ -136,7 +142,7 @@ def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, prim
             landmark = simplex[0]
 
         N_G = BigN_G[landmark]
-
+        idx_2_n_g = BigN_G2S[landmark]
         A = BigA[landmark]
         V = BigV[landmark]
         f = BigF[landmark]
@@ -151,18 +157,24 @@ def loop_task_3(simplex_indices, Sigma, BigN_G, BigA, BigV, BigF, S, P, a1, prim
         for l in N_G:
             if l not in J:
                 not_J.append(l)
-                            
+
+        J = [idx_2_n_g[j] for j in J]
+        not_J = [idx_2_n_g[nj] for nj in not_J]
+                                       
         G = A[not_J,:]
         h = V[not_J]
 
         A_eq = A[J,:]
         b_eq = V[J]
 
-        y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
-
+        problem = Problem(H, f, G, h, A_eq, b_eq)
+        solution = solve_problem(problem, solver="daqp")
+        y = solution.x
+                            
+                        
         if y is not None: 
-            
-            if d > 0 and not solution.is_optimal(primtol):
+
+            if d > 0 and LA.norm(G) != 0 and not solution.is_optimal(primtol):
                 continue
 
             fval = 1/2 * np.linalg.norm(y - S[landmark]) ** 2
@@ -220,7 +232,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     
     print("Generating 1-Dimensional Weighted Cech Complex")
         
-    batch_size = len(S) #max(1000, int(len(S) / 24))
+    batch_size = max(1000, int(len(S) / 24))
     
     batches = []
     curr_index = 0
@@ -306,10 +318,11 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
     # Preprocess Neighbors
     print("Preprocessing Dual Matrices: ", len(S))
 
-    batch_size = 10000 #max(1000, int(len(S) / 24))
+    batch_size = 1000 #max(1000, int(len(S) / 24))
 
     if len(S) <= batch_size: 
         BigN_G = []
+        BigN_G2S = []
         BigA = []
         BigV = []
         BigF = []
@@ -317,19 +330,23 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
         with tqdm( total = len(S) ) as pbar:
             
             for landmark in range(len(S)):
-                
-                BigN_G.append([j for j in range(len(S)) if Y[landmark][j] == 1])
+
+                curr_N_G = [j for j in range(len(S)) if Y[landmark][j] == 1]
+                BigN_G.append(curr_N_G)
+
+                BigN_G2S.append({curr_N_G[i]: i for i in range(len(test_keys))})
         
                 A_i = lambda i : S[i] - S[landmark]
                 V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
             
-                BigA.append(np.array([A_i(j) for j in range(len(S))], dtype=c_double))
-                BigV.append(np.array([V_i(j) for j in range(len(S))], dtype=c_double))
+                BigA.append(np.array([A_i(j) for j in curr_N_G], dtype=c_double))
+                BigV.append(np.array([V_i(j) for j in curr_N_G], dtype=c_double))
                 BigF.append(-1 * np.array(S[landmark], dtype=c_double))
     
                 pbar.update(1)
     else:
         BigN_G = len(S) * [0]
+        BigN_G2S = len(S) * [0]
         BigA = len(S) * [0]
         BigV = len(S) * [0]
         BigF = len(S) * [0]
@@ -345,9 +362,10 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                             
             result = list(tqdm(pool.map(loop_task_2,  batches, repeat(S), repeat(P), repeat(Y) ), total = len(batches)))
     
-        for batch_landmarks, currNG, currA, currV, currF in result:
+        for batch_landmarks, currNG, currReverse, currA, currV, currF in result:
             for k, landmark in enumerate(batch_landmarks): 
                 BigN_G[landmark] = currNG[k]
+                BigN_G2S[landmark] = currReverse[k]
                 BigA[landmark] = currA[k]
                 BigV[landmark] = currV[k]
                 BigF[landmark] = currF[k]
@@ -405,7 +423,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
             #     batch_size = int(len(Sigma) / 24)
 
             #batch_size = 10000
-            batch_size = 500000
+            batch_size = 100000
 
             
             if len(Sigma) < batch_size:
@@ -420,6 +438,8 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                             landmark = simplex[0]
         
                         N_G = BigN_G[landmark]
+
+                        idx_2_n_g = BigN_G2S[landmark]
         
                         A = BigA[landmark]
                         V = BigV[landmark]
@@ -439,6 +459,9 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                         for l in N_G:
                             if l != landmark and l not in J:
                                 not_J.append(l)
+
+                        J = [idx_2_n_g[j] for j in J]
+                        not_J = [idx_2_n_g[nj] for nj in not_J]
                                     
                         G = A[not_J,:]
                         h = V[not_J]
@@ -446,39 +469,9 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                         A_eq = A[J,:]
                         b_eq = V[J]
         
-                        #y = solve_qp(H, f, G, h, A_eq, b_eq, solver="daqp")
-
                         problem = Problem(H, f, G, h, A_eq, b_eq)
                         solution = solve_problem(problem, solver="daqp")
                         y = solution.x
-
-                        # if d > 0 and y is not None and LA.norm(solution.y, ord=1) == 0 and LA.norm(solution.z, ord=1) == 0:
-                        #     print(simplex, solution.y, solution.z, solution.z_box)
-                        #     pbar.update(1)
-                        #     continue
-
-                        # if [4830, 9411] == simplex:
-                        #     print(simplex, solution.x, solution.y, solution.z)
-                        # if [9411, 18382] == simplex:
-                        #     print(simplex, solution.x, solution.y, solution.z)
-                        # if [4830, 18382] == simplex:
-                        #     print(simplex, solution.x, solution.y, solution.z)
-
-                        # if [4830, 9411, 18382] == simplex: 
-                        #     print(simplex, solution.x, solution.y, solution.z)
-
-                        #if d > 0 and y is not None:
-                            
-    
-                        # if d > 0 and y is not None:
-                        #     flag = False
-                        #     for index in simplex: 
-                        #         if np.linalg.norm(y - S[index]) < primtol:
-                        #             flag = True
-
-                        #     if flag: 
-                        #         pbar.update(1)
-                        #         continue
                             
                         
                         if y is not None: 
@@ -514,7 +507,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                 
                 with ProcessPoolExecutor(max_workers=8) as pool:
                                     
-                    result = list(tqdm(pool.map(loop_task_3,  batches, repeat(Sigma), repeat(BigN_G), repeat(BigA), repeat(BigV), repeat(BigF), repeat(S), repeat(P), repeat(a1), repeat(primtol)), total = len(batches)))
+                    result = list(tqdm(pool.map(loop_task_3,  batches, repeat(Sigma), repeat(d), repeat(BigN_G), repeat(BigN_G2S), repeat(BigA), repeat(BigV), repeat(BigF), repeat(S), repeat(P), repeat(a1), repeat(primtol)), total = len(batches)))
                 
                 for tempX, tempAlpha in result:
                     for simplex, curr_tuple in zip(tempX, tempAlpha):
