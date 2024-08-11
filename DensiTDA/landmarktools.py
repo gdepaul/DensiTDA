@@ -2,7 +2,7 @@ import numpy as np
 from numpy import linalg as LA
 from tqdm import tqdm
 
-def max_of_gaussians_landmarking(X, A, candidate_landmarks, h, s, metric = 'euclidean'):
+def max_of_gaussians_landmarking(X, A, candidate_landmarks, h, s):
 
     def K(r): 
         return np.exp(-r ** 2 / 2)
