@@ -459,15 +459,23 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                         for l in N_G:
                             if l != landmark and l not in J:
                                 not_J.append(l)
-
+                        
                         J = [idx_2_n_g[j] for j in J]
                         not_J = [idx_2_n_g[nj] for nj in not_J]
-                                    
-                        G = A[not_J,:]
-                        h = V[not_J]
-        
-                        A_eq = A[J,:]
-                        b_eq = V[J]
+
+                        if len(not_J) > 0:
+                            G = A[not_J,:]
+                            h = V[not_J]
+                        else: 
+                            G = 0
+                            h = 0
+
+                        if len(not_J) > 0:
+                            A_eq = A[J,:]
+                            b_eq = V[J]
+                        else: 
+                            A_eq = 0
+                            b_eq = 0
         
                         problem = Problem(H, f, G, h, A_eq, b_eq)
                         solution = solve_problem(problem, solver="daqp")
