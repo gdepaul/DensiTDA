@@ -10,11 +10,11 @@ def max_of_gaussians_landmarking(X, A, candidate_landmarks, h, s):
     def p(x,y):
         return K(LA.norm(x - y) / h)
     
-    def f(x):
+    def f(x, powers, X_dom):
         
         my_sum = 0
         
-        for a_i, x_i in zip(A, X):
+        for a_i, x_i in zip(powers, X_dom):
             my_sum += a_i*p(x,x_i)
             
         return my_sum
@@ -48,7 +48,7 @@ def max_of_gaussians_landmarking(X, A, candidate_landmarks, h, s):
     print("Initializing Distrbution over Candidate Landmark Points:")
     with tqdm( total = len(candidate_landmarks) ) as pbar:
         for k, x in enumerate(candidate_landmarks):
-            f_x.append(f(x))
+            f_x.append(f(x, A, X))
 
             pbar.update(1)
             
