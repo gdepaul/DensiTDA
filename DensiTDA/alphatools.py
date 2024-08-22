@@ -334,7 +334,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                 curr_N_G = [j for j in range(len(S)) if Y[landmark][j] == 1]
                 BigN_G.append(curr_N_G)
 
-                BigN_G2S.append({curr_N_G[i]: i for i in range(len(test_keys))})
+                BigN_G2S.append({curr_N_G[i]: i for i in range(len(curr_N_G))})
         
                 A_i = lambda i : S[i] - S[landmark]
                 V_i = lambda i : 1/2 * (np.linalg.norm(S[i]) ** 2 - np.linalg.norm(S[landmark]) ** 2 - P[i] + P[landmark])
@@ -467,15 +467,15 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                             G = A[not_J,:]
                             h = V[not_J]
                         else: 
-                            G = 0
-                            h = 0
+                            G = np.array([0],dtype=c_double)
+                            h = np.array([0],dtype=c_double)
 
                         if len(not_J) > 0:
                             A_eq = A[J,:]
                             b_eq = V[J]
                         else: 
-                            A_eq = 0
-                            b_eq = 0
+                            A_eq = np.array([0],dtype=c_double)
+                            b_eq = np.array([0],dtype=c_double)
         
                         problem = Problem(H, f, G, h, A_eq, b_eq)
                         solution = solve_problem(problem, solver="daqp")
