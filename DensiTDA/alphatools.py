@@ -16,6 +16,9 @@ from numpy import genfromtxt
 from concurrent.futures import ProcessPoolExecutor
 from itertools import repeat
 from scipy.sparse.csgraph import connected_components
+from itertools import combinations
+import plotly.express as px
+
 
 class SimplexTree: 
     
@@ -170,8 +173,8 @@ def loop_task_3(simplex_indices, Sigma, d, BigN_G, BigN_G2S, BigA, BigV, BigF, S
         problem = Problem(H, f, G, h, A_eq, b_eq)
         solution = solve_problem(problem, solver="daqp")
         y = solution.x
-                            
-                        
+        
+        
         if y is not None: 
 
             if d > 0 and LA.norm(G) != 0 and not solution.is_optimal(primtol):
@@ -399,7 +402,7 @@ def compute_alpha_complex(S, P, a1, D, primtol=0.000001):
                     visited_prev_words.add_simplex(sub_facet)
                     visited_prev_word_list.append(sub_facet)
                     
-            Sigma = [] 
+            Sigma = []
             for word in visited_prev_word_list:
                 indices = X.simplex_leaves(word)
                 for choose_pair in itertools.combinations(indices, r = 2):
@@ -594,62 +597,168 @@ def draw_alpha_complex_2d(alpha_complex, S, p, a1):
 
     fig.show()
 
+def draw_alpha_complex(cplx, S, a1, draw_points = True, draw_edges = True, draw_surfaces = True):
 
-def draw_alpha_complex(alpha_complex, S, a1, points_only = True):
+    node_names = []
+    k = 0
+    node_2_idx = {}
+    for node, val in cplx[0]:
+        node_names.append(node[0])
+        node_2_idx[node[0]] = k
+        k += 1
+        
+    D = max(cplx.keys())
     
+    max_name = len(node_names)
+
+    edge_list = []
+    Y = np.zeros((max_name, max_name))
+
+    for edge, val in cplx[1]: 
+        edge_list.append([node_2_idx[edge[0]], node_2_idx[edge[1]]])
+        Y[node_2_idx[edge[0]], node_2_idx[edge[1]]] = 1
+
+    groups = connected_components(Y)[1]
+
     fig = go.Figure()
     
     things_to_plot = []
-    
-    # Set axes properties
-    fig.update_xaxes(range=[-5, 5], zeroline=False)
-    fig.update_yaxes(range=[-2, 8])
-
-    filtered_nodes = []
-    
-    for xyz, simplex in zip(S, alpha_complex[0]):
         
-        if simplex[1] < a1: 
-            filtered_nodes.append(xyz)
-            
-    filtered_nodes = np.array(filtered_nodes)
-
-    if points_only: 
-        
-        things_to_plot.append(go.Scatter3d(x=filtered_nodes[:,0], y=filtered_nodes[:,1], z=filtered_nodes[:,2],
+    if draw_points:    
+        things_to_plot.append(
+            go.Scatter3d(x=S[:,0], y=S[:,1], z=S[:,2],
                 mode='markers',
                 marker=dict(
                     size=5,
-                    color=filtered_nodes[:,2],                # set color to an array/list of desired values
-                    colorscale='Viridis',   # choose a colorscale
+                    color=groups,                # set color to an array/list of desired values
+                    colorscale=px.colors.qualitative.Dark24,   # choose a colorscale
                     opacity=1
-                ), showlegend=False))
-    else: 
+                    ), 
+                hoverinfo='none',
+                showlegend=False)
+        )
     
-        for simplex, weight in alpha_complex[1]:
-            if weight < a1:
-                things_to_plot.append(go.Scatter3d(x=[S[simplex[0]][0], S[simplex[1]][0]], y=[S[simplex[0]][1], S[simplex[1]][1]], z=[S[simplex[0]][2], S[simplex[1]][2]], mode='lines',line=dict(
-                                                    color="black",
-                                                    width=10),showlegend=False))
-            
-        for simplex, weight in alpha_complex[2]:
-            if weight < a1:
-                X = [S[simplex[0]][0], S[simplex[1]][0], S[simplex[2]][0]]
-                Y = [S[simplex[0]][1], S[simplex[1]][1], S[simplex[2]][1]]
-                Z = [S[simplex[0]][2], S[simplex[1]][2], S[simplex[2]][2]]
-                
-                i = np.array([0])
-                j = np.array([1])
-                k = np.array([2])
-                
-                things_to_plot.append(go.Mesh3d(x=X, y=Y, z=Z,alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k))
-        
+    if draw_edges:
+        Xe=[]
+        Ye=[]
+        Ze=[]
+        for e in edge_list:
+            Xe+=[S[e[0]][0],S[e[1]][0], None]# x-coordinates of edge ends
+            Ye+=[S[e[0]][1],S[e[1]][1], None]
+            Ze+=[S[e[0]][2],S[e[1]][2], None]
+
+        things_to_plot.append(
+                    go.Scatter3d(x=Xe,
+                       y=Ye,
+                       z=Ze,
+                       mode='lines',
+                       line=dict(color='rgb(125,125,125)', width=1),
+                       hoverinfo='none',
+                       showlegend=False
+                    )
+            )
+    
+    if draw_surfaces:
+        i = []
+        j = []
+        k = []
+        for simplex, val in cplx[3]:
+            if len(simplex) == D + 1:
+                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                    i.append(node_2_idx[idx_1])
+                    j.append(node_2_idx[idx_2])
+                    k.append(node_2_idx[idx_3])
+
+        i = np.array(i)
+        j = np.array(j)
+        k = np.array(k)
+
+        things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='purple', i=i, j=j, k=k,hoverinfo='none'))
+
+        i = []
+        j = []
+        k = []
+        for simplex, val in cplx[2]:
+            if len(simplex) == D:
+                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                    i.append(node_2_idx[idx_1])
+                    j.append(node_2_idx[idx_2])
+                    k.append(node_2_idx[idx_3])
+
+        i = np.array(i)
+        j = np.array(j)
+        k = np.array(k)
+
+        things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k,hoverinfo='none'))
+    
     layout = go.Layout(
-        autosize=False,
-        width=1000,
-        height=1000
-    )
-        
+            autosize=False,
+            width=1000,
+            height=1000
+        )
+            
     fig = go.Figure(data=things_to_plot, layout=layout)
-        
+
+    fig.update_scenes(xaxis_visible=False, yaxis_visible=False,zaxis_visible=False )
+            
     fig.show()
+
+# def draw_alpha_complex(alpha_complex, S, a1, draw_points = True, draw_edges = True, draw_surfaces = True):
+    
+#     fig = go.Figure()
+    
+#     things_to_plot = []
+    
+#     # Set axes properties
+#     fig.update_xaxes(range=[-5, 5], zeroline=False)
+#     fig.update_yaxes(range=[-2, 8])
+
+#     filtered_nodes = []
+    
+#     for xyz, simplex in zip(S, alpha_complex[0]):
+        
+#         if simplex[1] < a1: 
+#             filtered_nodes.append(xyz)
+            
+#     filtered_nodes = np.array(filtered_nodes)
+
+#     if draw_points: 
+        
+#         things_to_plot.append(go.Scatter3d(x=filtered_nodes[:,0], y=filtered_nodes[:,1], z=filtered_nodes[:,2],
+#                 mode='markers',
+#                 marker=dict(
+#                     size=5,
+#                     color=filtered_nodes[:,2],                # set color to an array/list of desired values
+#                     colorscale='Viridis',   # choose a colorscale
+#                     opacity=1
+#                 ), showlegend=False))
+#     if draw_edges:  
+    
+#         for simplex, weight in alpha_complex[1]:
+#             if weight < a1:
+#                 things_to_plot.append(go.Scatter3d(x=[S[simplex[0]][0], S[simplex[1]][0]], y=[S[simplex[0]][1], S[simplex[1]][1]], z=[S[simplex[0]][2], S[simplex[1]][2]], mode='lines',line=dict(
+#                                                     color="black",
+#                                                     width=10),showlegend=False))
+
+#     if draw_surfaces:            
+#         for simplex, weight in alpha_complex[2]:
+#             if weight < a1:
+#                 X = [S[simplex[0]][0], S[simplex[1]][0], S[simplex[2]][0]]
+#                 Y = [S[simplex[0]][1], S[simplex[1]][1], S[simplex[2]][1]]
+#                 Z = [S[simplex[0]][2], S[simplex[1]][2], S[simplex[2]][2]]
+                
+#                 i = np.array([0])
+#                 j = np.array([1])
+#                 k = np.array([2])
+                
+#                 things_to_plot.append(go.Mesh3d(x=X, y=Y, z=Z,alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k))
+        
+#     layout = go.Layout(
+#         autosize=False,
+#         width=1000,
+#         height=1000
+#     )
+        
+#     fig = go.Figure(data=things_to_plot, layout=layout)
+        
+#     fig.show()

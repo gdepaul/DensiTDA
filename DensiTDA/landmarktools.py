@@ -43,7 +43,7 @@ def max_of_gaussians_landmarking_helper(X, A, candidate_landmarks, h, s):
         
         b = c / p(z, y,h)
         
-        return lambda x : b * p(z, x,h) #b, z
+        return b, lambda x : b * p(z, x,h) #b, z
 
     f_y = np.array([0.0 for x in candidate_landmarks])
 
@@ -118,14 +118,14 @@ def max_of_gaussians_landmarking_helper(X, A, candidate_landmarks, h, s):
             k = np.argmax(f_x - f_y)
             y_k = X[k]
     
-            g_k = GaussFit(y_k, f_x[k])
+            b_k, g_k = GaussFit(y_k, f_x[k])
                 # b_k, z_k = GaussFit(y_k, f_x[k])
                 # g_k = lambda x : b_k * p(z_k, x)
                 
             chosen_landmark_indices.append(k)
             chosen_landmarks.append(y_k)
             total_gaussians.append(g_k)
-                #B.append(b_k)
+            B.append(b_k)
                     
             # penalize values         
             count_satistied = 0
@@ -140,13 +140,15 @@ def max_of_gaussians_landmarking_helper(X, A, candidate_landmarks, h, s):
             inc = count_satistied - pbar.n
             pbar.update(n=inc)
 
+    # return alpha scheme 
+
     return chosen_landmarks, total_gaussians, B
 
 def max_of_gaussians_landmarking(X, A, candidate_landmarks, h, s):
 
     chosen_landmarks, total_gaussians, powers = max_of_gaussians_landmarking_helper(X, A, candidate_landmarks, h, s)
     
-    return chosen_landmarks
+    return chosen_landmarks, powers
 
 def max_of_gaussians_2D_plot(X, A, candidate_landmarks, h, s, cut_off = 0.05):
 

@@ -4,6 +4,7 @@ import numpy as np
 from itertools import combinations
 from scipy.sparse.csgraph import connected_components
 import plotly.express as px
+from sklearn.manifold import TSNE
 from tqdm import tqdm
 
 def maximal_graph_from_alpha_complex(my_alpha_complex, top_dimension, a1 = 1):
@@ -140,6 +141,98 @@ def split_codimension_of_maximal_graph(maximal_graph, top_dimension):
 
     return final_graph
 
+def draw_abstract_simplcial_complex(cplx):
+
+    node_names = []
+    k = 0
+    node_2_idx = {}
+    for node, val in cplx[0]:
+        node_names.append(node[0])
+        node_2_idx[node[0]] = k
+        k += 1
+    
+    max_name = len(node_names)
+
+    edge_list = []
+    Y = np.zeros((max_name, max_name))
+
+    for edge, val in cplx[1]: 
+        edge_list.append([node_2_idx[edge[0]], node_2_idx[edge[1]]])
+        Y[node_2_idx[edge[0]], node_2_idx[edge[1]]] = 1
+
+    groups = connected_components(Y)[1]
+
+    G=ig.Graph(edge_list, directed=False)
+    #layt=G.layout('kk', dim=3)
+    layt=G.layout('fr3d', dim=6)
+    S = np.array(layt)
+
+    tsne = TSNE(n_components=3)
+    S = tsne.fit_transform(S)
+    
+    fig = go.Figure()
+    
+    things_to_plot = []
+        
+    things_to_plot.append(
+        go.Scatter3d(x=S[:,0], y=S[:,1], z=S[:,2],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=groups,                # set color to an array/list of desired values
+                colorscale=px.colors.qualitative.Dark24,   # choose a colorscale
+                opacity=1
+                ), 
+            hoverinfo='none',
+            showlegend=False)
+    )
+    
+    Xe=[]
+    Ye=[]
+    Ze=[]
+    for e in edge_list:
+        Xe+=[S[e[0],0],S[e[1],0], None]# x-coordinates of edge ends
+        Ye+=[S[e[0],1],S[e[1],1], None]
+        Ze+=[S[e[0],2],S[e[1],2], None]
+    
+    things_to_plot.append(
+                go.Scatter3d(x=Xe,
+                   y=Ye,
+                   z=Ze,
+                   mode='lines',
+                   line=dict(color='rgb(125,125,125)', width=1),
+                   hoverinfo='none',
+                   showlegend=False
+                )
+        )
+    
+    i = []
+    j = []
+    k = []
+    for simplex, val in cplx[2]:
+        for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+            i.append(node_2_idx[idx_1])
+            j.append(node_2_idx[idx_2])
+            k.append(node_2_idx[idx_3])
+                    
+    i = np.array(i)
+    j = np.array(j)
+    k = np.array(k)
+                    
+    things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k,hoverinfo='none'))
+    
+    layout = go.Layout(
+            autosize=False,
+            width=1000,
+            height=1000
+        )
+            
+    fig = go.Figure(data=things_to_plot, layout=layout)
+
+    fig.update_scenes(xaxis_visible=False, yaxis_visible=False,zaxis_visible=False )
+            
+    fig.show()
+
 def draw_clique_graph(E):
 
     node_names = []
@@ -207,7 +300,7 @@ def draw_clique_graph(E):
     j = []
     k = []
     for simplex in E:
-        if len(simplex) > 3:
+        if len(simplex) == 4:
             for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
                 i.append(idx_1)
                 j.append(idx_2)
