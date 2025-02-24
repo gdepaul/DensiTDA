@@ -659,31 +659,30 @@ def draw_alpha_complex(cplx, S, a1, draw_points = True, draw_edges = True, draw_
             )
     
     if draw_surfaces:
-        i = []
-        j = []
-        k = []
-        for simplex, val in cplx[3]:
-            if len(simplex) == D + 1:
-                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
-                    i.append(node_2_idx[idx_1])
-                    j.append(node_2_idx[idx_2])
-                    k.append(node_2_idx[idx_3])
+        # i = []
+        # j = []
+        # k = []
+        # for simplex, val in cplx[3]:
+        #     if len(simplex) == D + 1:
+        #         for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+        #             i.append(node_2_idx[idx_1])
+        #             j.append(node_2_idx[idx_2])
+        #             k.append(node_2_idx[idx_3])
 
-        i = np.array(i)
-        j = np.array(j)
-        k = np.array(k)
+        # i = np.array(i)
+        # j = np.array(j)
+        # k = np.array(k)
 
-        things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='purple', i=i, j=j, k=k,hoverinfo='none'))
+        # things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='purple', i=i, j=j, k=k,hoverinfo='none'))
 
         i = []
         j = []
         k = []
         for simplex, val in cplx[2]:
-            if len(simplex) == D:
-                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
-                    i.append(node_2_idx[idx_1])
-                    j.append(node_2_idx[idx_2])
-                    k.append(node_2_idx[idx_3])
+            for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                i.append(node_2_idx[idx_1])
+                j.append(node_2_idx[idx_2])
+                k.append(node_2_idx[idx_3])
 
         i = np.array(i)
         j = np.array(j)
