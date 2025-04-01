@@ -11,7 +11,7 @@ def K(r):
 def p(x,y,h):
     return K(LA.norm(x - y) / h)
     
-def f(x, powers, X_dom,h):
+def f(x, powers, X_dom, h):
         
     my_sum = 0
         
@@ -19,6 +19,18 @@ def f(x, powers, X_dom,h):
         my_sum += a_i*p(x,x_i,h)
             
     return my_sum
+
+def projection(x, powers, X_dom, h):
+        
+    my_num = 0 * X_dom[0]
+    my_den = 0
+        
+    for a_i, x_i in zip(powers, X_dom):
+        curr_val = a_i*p(x,x_i,h)
+        my_num += curr_val * x_i
+        my_den += curr_val
+            
+    return my_num / my_den
 
 def batch_f(curr_batch, powers, X_dom, h): 
 
@@ -28,6 +40,42 @@ def batch_f(curr_batch, powers, X_dom, h):
         batch_result.append(f(x,powers,X_dom,h))
 
     return batch_result
+
+def optimal_convex_landmarking(X, A, h, s): 
+
+    S = []
+    Y = []
+    epsilon = -np.log(s)
+
+    print("Calculating Projections p(x)")
+    with tqdm( total = len(X) ) as pbar:
+        for x in X: 
+            Y.append(projection(x, A, X, h))
+            pbar.update(n=1)
+
+    exp_conjugate = []
+
+    print("Calculating tilde f(y)")
+    with tqdm( total = len(X) ) as pbar:
+        for x, y in zip(X,Y): 
+            exp_conjugate.append( f(x, A, X, h) * np.exp( (LA.norm(x - y) ** 2) / (2 * h ** 2) ) )
+            pbar.update(n=1)
+
+    chosen_landmarks = []
+    new_powers = []
+    print("Greedy algorithm")
+    with tqdm( total = len(X) ) as pbar:
+        for k in np.argsort(exp_conjugate):
+            flag = 1
+            for y in chosen_landmarks:
+                if ( LA.norm(Y[k] - y) ** 2 ) < 2 * h ** 2 * epsilon:
+                    flag = 0
+            if flag == 1: 
+                chosen_landmarks.append(Y[k])
+                new_powers.append(exp_conjugate[k])
+            pbar.update(n=1)
+
+    return chosen_landmarks, new_powers
 
 def max_of_gaussians_landmarking_helper(X, A, candidate_landmarks, h, s):
     
@@ -114,14 +162,12 @@ def max_of_gaussians_landmarking_helper(X, A, candidate_landmarks, h, s):
     with tqdm( total = len(candidate_landmarks) ) as pbar:
     
         while np.max(f_x - f_y) > 0: 
-                
+            
             k = np.argmax(f_x - f_y)
             y_k = X[k]
     
             b_k, g_k = GaussFit(y_k, f_x[k])
-                # b_k, z_k = GaussFit(y_k, f_x[k])
-                # g_k = lambda x : b_k * p(z_k, x)
-                
+
             chosen_landmark_indices.append(k)
             chosen_landmarks.append(y_k)
             total_gaussians.append(g_k)
