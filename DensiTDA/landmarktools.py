@@ -20,7 +20,7 @@ def f(x, powers, X_dom, h):
             
     return my_sum
 
-def projection(x, powers, X_dom, h):
+def conv_projection(x, powers, X_dom, h):
         
     my_num = 0 * X_dom[0]
     my_den = 0
@@ -50,7 +50,7 @@ def optimal_convex_landmarking(X, A, h, s):
     print("Calculating Projections p(x)")
     with tqdm( total = len(X) ) as pbar:
         for x in X: 
-            Y.append(projection(x, A, X, h))
+            Y.append(conv_projection(x, A, X, h))
             pbar.update(n=1)
 
     exp_conjugate = []
@@ -69,6 +69,87 @@ def optimal_convex_landmarking(X, A, h, s):
             flag = 1
             for y in chosen_landmarks:
                 if ( LA.norm(Y[k] - y) ** 2 ) < 2 * h ** 2 * epsilon:
+                    flag = 0
+            if flag == 1: 
+                chosen_landmarks.append(Y[k])
+                new_powers.append(exp_conjugate[k])
+            pbar.update(n=1)
+
+    return chosen_landmarks, new_powers
+
+def cosine_similarity(x,y,t):
+    r = np.dot(x,y)
+    
+    if r > 0: 
+        return r ** t 
+    else: 
+        return 0 
+
+def k_fun(x, powers, X_dom, t):
+        
+    my_sum = 0
+        
+    for a_i, x_i in zip(powers, X_dom):
+        my_sum += a_i*cosine_similarity(x,x_i,t)
+            
+    return my_sum
+
+def phi_x(x,y):
+
+    return y / (np.dot(x,y))
+
+def sphere_projection(x, powers, X_dom, t):
+        
+    my_sum = 0
+        
+    for a_i, x_i in zip(powers, X_dom):
+        my_sum += a_i*cosine_similarity(x,x_i,t) * phi_x(x, x_i)
+            
+    return my_sum
+
+def sphere_correction(v):
+
+    return v / LA.norm(v)
+
+def psi_conjugate(x,y,t): 
+
+    r = np.dot(x,y)
+    
+    if r > 0: 
+        return -t * np.log(r)
+    else: 
+        return np.inf 
+
+def optimal_spherical_landmarking(X, A, t, s, a):
+    S = []
+    Y = []
+    epsilon = -np.log(s)
+
+    print("Calculating Projections p(x)")
+    with tqdm( total = len(X) ) as pbar:
+        for x in X: 
+            Y.append( sphere_correction( sphere_projection(x, A, X, t) / k_fun(x, A, X, t) ) )
+            pbar.update(n=1)
+
+    exp_conjugate = []
+
+    print("Calculating tilde f(y)")
+    with tqdm( total = len(X) ) as pbar:
+        for x, y in zip(X,Y): 
+            exp_conjugate.append( - np.log( k_fun(x, A, X, t) )  -  psi_conjugate(x,y,t) )
+            pbar.update(n=1)
+
+    a = ( max(exp_conjugate) + min(exp_conjugate) )/2 
+    print(a)
+
+    chosen_landmarks = []
+    new_powers = []
+    print("Greedy algorithm")
+    with tqdm( total = len(X) ) as pbar:
+        for k in np.argsort(exp_conjugate):
+            flag = 1
+            for y in chosen_landmarks:
+                if exp_conjugate[k] > a or cosine_similarity(y,Y[k],t) > s: # or  :
                     flag = 0
             if flag == 1: 
                 chosen_landmarks.append(Y[k])
