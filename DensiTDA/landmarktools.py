@@ -96,7 +96,10 @@ def k_fun(x, powers, X_dom, t):
 
 def phi_x(x,y):
 
-    return y / (np.dot(x,y))
+    if abs(np.dot(x,y)) > 0.0001:
+        return y / (np.dot(x,y))
+    else:
+        return np.zeros(y.shape)
 
 def sphere_projection(x, powers, X_dom, t):
         
@@ -120,28 +123,73 @@ def psi_conjugate(x,y,t):
     else: 
         return np.inf 
 
-def optimal_spherical_landmarking(X, A, t, s, a):
+def pre_allocate_Y(batch_indices, X, A, t):
+    
+    return_batch = [] 
+
+    for index in batch_indices: 
+        x = X[index]
+        return_batch.append( (index, sphere_correction( sphere_projection(x, A, X, t) / k_fun(x, A, X, t) )) )
+
+    return return_batch
+
+def pre_allocate_exponential_conjugate(batch_indices, X, A, Y, t):
+
+    return_batch = [] 
+
+    for index in batch_indices: 
+        x = X[index]
+        y = Y[index]
+        return_batch.append( (index, - np.log( k_fun(x, A, X, t) )  -  psi_conjugate(x,y,t)  ) )
+
+    return return_batch
+
+def optimal_spherical_landmarking(X, A, t, s, a, batch_size = 10000):
     S = []
-    Y = []
     epsilon = -np.log(s)
 
-    print("Calculating Projections p(x)")
-    with tqdm( total = len(X) ) as pbar:
-        for x in X: 
-            Y.append( sphere_correction( sphere_projection(x, A, X, t) / k_fun(x, A, X, t) ) )
-            pbar.update(n=1)
+    #batch_size = max(10000, int(len(X) / 2048))
 
-    exp_conjugate = []
+    print("Calculating Projections p(x)")
+    batches = []
+    curr_index = 0
+    while curr_index + batch_size < len(X): 
+        batches.append(range(curr_index, curr_index + batch_size))
+        curr_index += batch_size
+    batches.append(range(curr_index, len(X)))
+
+    with ProcessPoolExecutor(max_workers=8) as pool:
+
+        result = list(tqdm(pool.map(pre_allocate_Y,  batches, repeat(X), repeat(A), repeat(t) ), total = len(batches)))
+        
+    Y = np.zeros(X.shape)
+    with tqdm( total = len(result) ) as pbar:
+        for batch_result in result: 
+            for index, transport_val in batch_result: 
+                Y[index] = transport_val
+            pbar.update(n = 1)
 
     print("Calculating tilde f(y)")
-    with tqdm( total = len(X) ) as pbar:
-        for x, y in zip(X,Y): 
-            exp_conjugate.append( - np.log( k_fun(x, A, X, t) )  -  psi_conjugate(x,y,t) )
-            pbar.update(n=1)
 
-    a = ( max(exp_conjugate) + min(exp_conjugate) )/2 
-    print(a)
+    with ProcessPoolExecutor(max_workers=8) as pool:
 
+        result = list(tqdm(pool.map(pre_allocate_exponential_conjugate, batches, repeat(X), repeat(A), repeat(Y), repeat(t) ), total = len(batches)))
+        
+    exp_conjugate = np.zeros(len(X))
+    with tqdm( total = len(result) ) as pbar:
+        for batch_result in result: 
+            for index, transport_val in batch_result: 
+                exp_conjugate[index] = transport_val
+            pbar.update(n = 1)
+
+    # exp_conjugate = []
+    # with tqdm( total = len(X) ) as pbar:
+    #     for x, y in zip(X,Y): 
+    #         exp_conjugate.append( - np.log( k_fun(x, A, X, t) )  -  psi_conjugate(x,y,t) )
+    #         pbar.update(n=1)
+
+    a_percentile =  np.percentile(exp_conjugate, a)# ( max(exp_conjugate) + min(exp_conjugate) )/2 
+    
     chosen_landmarks = []
     new_powers = []
     print("Greedy algorithm")
@@ -149,7 +197,7 @@ def optimal_spherical_landmarking(X, A, t, s, a):
         for k in np.argsort(exp_conjugate):
             flag = 1
             for y in chosen_landmarks:
-                if exp_conjugate[k] > a or cosine_similarity(y,Y[k],t) > s: # or  :
+                if exp_conjugate[k] > a_percentile or cosine_similarity(y,Y[k],t) > s: # or  :
                     flag = 0
             if flag == 1: 
                 chosen_landmarks.append(Y[k])
